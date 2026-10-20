@@ -1,29 +1,19 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
+import { useTraffic, DEMO_USERS } from '../../context/TrafficContext';
+import { UserRole } from '../../types/traffic';
 import {
-  Search,
-  Grid,
-  List,
-  Bell,
-  Sun,
-  Moon,
-  Settings,
-  LogOut,
-  User,
-  SlidersHorizontal,
-  X,
-  Check,
-  HardDrive,
-  FileText,
-  Image,
-  Video,
-  Music,
-  Archive,
-  Layers,
   Menu,
+  Bell,
+  Search,
+  Shield,
+  UserCheck,
+  Radio,
+  ExternalLink,
+  ChevronDown,
+  Sparkles,
+  AlertTriangle,
+  Zap
 } from 'lucide-react';
-import { useVault } from '../../context/VaultContext';
-import type { FileCategory } from '../../types';
-import { formatDate } from '../../lib/utils';
 
 interface NavbarProps {
   onToggleMobileMenu: () => void;
@@ -31,276 +21,175 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ onToggleMobileMenu }) => {
   const {
-    user,
-    theme,
-    toggleTheme,
-    viewMode,
-    setViewMode,
-    searchQuery,
+    currentUser,
+    switchUserRole,
+    advisories,
+    setActivePage,
     setSearchQuery,
-    typeFilter,
-    setTypeFilter,
-    activities,
-    setIsSettingsModalOpen,
-    setIsAuthModalOpen,
-    logout,
-  } = useVault();
+    searchQuery,
+    setAuthModalOpen
+  } = useTraffic();
 
-  const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
+  const [advisoryOpen, setAdvisoryOpen] = useState(false);
 
-  // Global hotkey: Ctrl+K or Cmd+K to focus search
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  const filterOptions: { label: string; value: FileCategory | 'all'; icon: React.ElementType }[] = [
-    { label: 'All', value: 'all', icon: Layers },
-    { label: 'Photos', value: 'image', icon: Image },
-    { label: 'Videos', value: 'video', icon: Video },
-    { label: 'Docs', value: 'document', icon: FileText },
-    { label: 'Audio', value: 'audio', icon: Music },
-  ];
+  const activeAdvisory = advisories.find(a => a.active);
 
   return (
-    <header className="sticky top-0 z-30 flex items-center justify-between h-16 px-4 md:px-6 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 transition-colors">
-      {/* Left: Mobile hamburger & Global Search */}
-      <div className="flex items-center gap-3 flex-1 max-w-2xl">
+    <header className="h-16 border-b border-slate-800 bg-navy-950/80 backdrop-blur-xl px-4 md:px-6 flex items-center justify-between gap-4 z-30 sticky top-0">
+      {/* Left: Mobile Toggle & Brand indicator */}
+      <div className="flex items-center gap-3">
         <button
           onClick={onToggleMobileMenu}
-          className="md:hidden p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
-          aria-label="Open sidebar"
+          className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 md:hidden"
+          aria-label="Toggle Menu"
         >
           <Menu className="w-5 h-5" />
         </button>
 
-        {/* Global Search Bar */}
-        <div className="relative flex-1 group">
-          <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400 dark:text-slate-500">
-            <Search className="w-4 h-4 group-focus-within:text-brand-600 dark:group-focus-within:text-brand-400 transition-colors" />
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 text-white font-black text-lg">
+            <Radio className="w-5 h-5 text-white animate-pulse" />
           </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-extrabold text-base md:text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-cyan-400 bg-clip-text text-transparent">
+                SmartRoute AI
+              </span>
+              <span className="hidden sm:inline-block px-2 py-0.5 text-[10px] uppercase font-bold tracking-wider rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+                v2.4 Live
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-slate-400">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+              <span className="text-slate-300 font-medium">Bengaluru Grid</span>
+              <span className="text-slate-500">•</span>
+              <span className="text-slate-400 hidden sm:inline">Real-time Telemetry</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Center: Search / Filter input */}
+      <div className="hidden lg:flex items-center flex-1 max-w-md mx-4">
+        <div className="relative w-full">
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
-            ref={searchInputRef}
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search files, photos, folders... (Ctrl+K)"
-            className="w-full pl-10 pr-10 py-2 text-sm bg-slate-100 dark:bg-slate-800/80 text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 rounded-xl border border-transparent focus:border-brand-500/40 focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-4 focus:ring-brand-500/10 transition-all"
+            placeholder="Search incident, junction, or road (e.g. Silk Board, Hebbal, Marathahalli)..."
+            className="w-full bg-navy-900/90 border border-slate-800 text-slate-200 placeholder-slate-500 text-xs rounded-xl pl-9 pr-4 py-2 focus:outline-none focus:border-cyan-500/60 focus:ring-1 focus:ring-cyan-500/40 transition"
           />
-          {searchQuery ? (
+          {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 text-xs"
             >
-              <X className="w-4 h-4" />
+              ✕
             </button>
-          ) : (
-            <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-              <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-mono font-medium text-slate-400 dark:text-slate-500 bg-slate-200/60 dark:bg-slate-700/60 rounded">
-                ⌘K
-              </kbd>
+          )}
+        </div>
+      </div>
+
+      {/* Right: Advisory banner, Role Switcher, Profile */}
+      <div className="flex items-center gap-2.5">
+        {/* Urgent Advisory Alert Indicator */}
+        {activeAdvisory && (
+          <div className="relative">
+            <button
+              onClick={() => setAdvisoryOpen(!advisoryOpen)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-semibold hover:bg-amber-500/20 transition"
+              title="Active City Advisory"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 animate-bounce" />
+              <span className="hidden md:inline">Advisory Active</span>
+            </button>
+
+            {advisoryOpen && (
+              <div className="absolute right-0 mt-2 w-80 p-3.5 rounded-2xl bg-navy-900 border border-amber-500/40 shadow-2xl z-50 text-xs space-y-2">
+                <div className="flex items-center justify-between text-amber-400 font-bold">
+                  <span className="flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4" />
+                    {activeAdvisory.title}
+                  </span>
+                  <button onClick={() => setAdvisoryOpen(false)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+                <p className="text-slate-300 leading-relaxed">{activeAdvisory.message}</p>
+                <div className="pt-1 text-[11px] text-slate-500">
+                  Issued by Bengaluru Municipal Traffic Control
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 1-Click Role Switcher Dropdown (Allows evaluating all 3 roles easily) */}
+        <div className="relative">
+          <button
+            onClick={() => setRoleDropdownOpen(!roleDropdownOpen)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-navy-900 border border-slate-800 hover:border-slate-700 text-xs text-slate-200 transition"
+          >
+            {currentUser.role === 'admin' ? (
+              <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+            ) : currentUser.role === 'warden' ? (
+              <span className="w-2 h-2 rounded-full bg-cyan-500"></span>
+            ) : (
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+            )}
+            <span className="font-semibold capitalize hidden sm:inline">{currentUser.role} View</span>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+          </button>
+
+          {roleDropdownOpen && (
+            <div className="absolute right-0 mt-2 w-64 p-2 rounded-2xl bg-navy-900 border border-slate-700 shadow-2xl z-50 text-xs space-y-1">
+              <div className="px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800">
+                Switch Role / Persona:
+              </div>
+
+              {(['commuter', 'warden', 'admin'] as UserRole[]).map(r => {
+                const u = DEMO_USERS[r];
+                const active = currentUser.role === r;
+                return (
+                  <button
+                    key={r}
+                    onClick={() => {
+                      switchUserRole(r);
+                      setRoleDropdownOpen(false);
+                    }}
+                    className={`w-full text-left p-2 rounded-xl flex items-center gap-2.5 transition ${
+                      active ? 'bg-cyan-500/15 border border-cyan-500/40 text-cyan-300' : 'hover:bg-slate-800 text-slate-200'
+                    }`}
+                  >
+                    <img src={u.avatarUrl} alt={u.name} className="w-7 h-7 rounded-full object-cover border border-slate-700" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold truncate text-white">{u.name}</div>
+                      <div className="text-[11px] text-slate-400 capitalize">{r} Mode</div>
+                    </div>
+                    {active && <span className="text-cyan-400 font-bold">✓</span>}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
 
-        {/* Type Quick-Filters (visible on larger screens) */}
-        <div className="hidden lg:flex items-center gap-1 bg-slate-100 dark:bg-slate-800/60 p-1 rounded-xl">
-          {filterOptions.map(opt => {
-            const Icon = opt.icon;
-            const isSelected = typeFilter === opt.value;
-            return (
-              <button
-                key={opt.value}
-                onClick={() => setTypeFilter(opt.value)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors ${
-                  isSelected
-                    ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                <span>{opt.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Right Controls: View Switcher, Notifications, Theme, Profile */}
-      <div className="flex items-center gap-2 md:gap-3">
-        {/* Grid / List View Toggle */}
-        <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200/50 dark:border-slate-700/50">
-          <button
-            onClick={() => setViewMode('grid')}
-            title="Grid view"
-            className={`p-1.5 rounded-md transition-colors ${
-              viewMode === 'grid'
-                ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-            }`}
-          >
-            <Grid className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setViewMode('list')}
-            title="List view"
-            className={`p-1.5 rounded-md transition-colors ${
-              viewMode === 'list'
-                ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 shadow-sm'
-                : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-            }`}
-          >
-            <List className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Theme Toggle Button */}
+        {/* User Avatar & Profile Quick Jump */}
         <button
-          onClick={toggleTheme}
-          title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-          className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+          onClick={() => setActivePage('profile')}
+          className="flex items-center gap-2 p-1 pl-2 rounded-xl hover:bg-slate-800/80 transition"
+          title="Go to User Profile"
         >
-          {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          <div className="text-right hidden md:block">
+            <div className="text-xs font-bold text-white truncate max-w-[120px]">{currentUser.name}</div>
+            <div className="text-[10px] text-slate-400 font-medium">Score: {currentUser.trustScore} pts</div>
+          </div>
+          <img
+            src={currentUser.avatarUrl}
+            alt={currentUser.name}
+            className="w-8 h-8 rounded-full object-cover ring-2 ring-cyan-500/40"
+          />
         </button>
-
-        {/* Notifications Popover */}
-        <div className="relative">
-          <button
-            onClick={() => setIsNotificationsOpen(prev => !prev)}
-            title="Activity Notifications"
-            className="relative p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
-          >
-            <Bell className="w-4 h-4" />
-            {activities.length > 0 && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-brand-500 rounded-full ring-2 ring-white dark:ring-slate-900" />
-            )}
-          </button>
-
-          {isNotificationsOpen && (
-            <>
-              <div
-                className="fixed inset-0 z-30"
-                onClick={() => setIsNotificationsOpen(false)}
-              />
-              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 z-40 p-4 animate-scale-in">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700 mb-2">
-                  <h3 className="font-semibold text-sm text-slate-900 dark:text-white">Recent Activity</h3>
-                  <span className="text-xs text-slate-400">{activities.length} events</span>
-                </div>
-
-                <div className="max-h-72 overflow-y-auto space-y-2 pr-1">
-                  {activities.slice(0, 8).map(act => (
-                    <div
-                      key={act.id}
-                      className="p-2.5 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50 flex items-start gap-3 transition-colors"
-                    >
-                      <div className="w-2 h-2 mt-1.5 rounded-full bg-brand-500 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-slate-800 dark:text-slate-200 truncate">
-                          {act.targetName}
-                        </p>
-                        <p className="text-[11px] text-slate-400 dark:text-slate-500">
-                          {act.details || act.action}
-                        </p>
-                      </div>
-                      <span className="text-[10px] text-slate-400 shrink-0">
-                        {formatDate(act.timestamp)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* User Profile Avatar / Menu */}
-        <div className="relative">
-          <button
-            onClick={() => setIsProfileOpen(prev => !prev)}
-            className="flex items-center gap-2 p-1 rounded-full hover:ring-2 hover:ring-brand-500/20 transition-all"
-          >
-            {user?.avatarUrl ? (
-              <img
-                src={user.avatarUrl}
-                alt={user.fullName}
-                className="w-8 h-8 rounded-full object-cover border border-slate-200 dark:border-slate-700"
-              />
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-brand-600 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-sm">
-                {user ? user.fullName.charAt(0).toUpperCase() : 'U'}
-              </div>
-            )}
-          </button>
-
-          {isProfileOpen && (
-            <>
-              <div
-                className="fixed inset-0 z-30"
-                onClick={() => setIsProfileOpen(false)}
-              />
-              <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 z-40 p-3 animate-scale-in">
-                {user ? (
-                  <>
-                    <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-700 mb-2">
-                      <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">
-                        {user.fullName}
-                      </p>
-                      <p className="text-xs text-slate-400 dark:text-slate-500 truncate">
-                        {user.email}
-                      </p>
-                    </div>
-
-                    <button
-                      onClick={() => {
-                        setIsSettingsModalOpen(true);
-                        setIsProfileOpen(false);
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 rounded-xl transition-colors"
-                    >
-                      <Settings className="w-4 h-4 text-slate-500" />
-                      <span>Storage & Supabase Config</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        logout();
-                        setIsProfileOpen(false);
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors mt-1"
-                    >
-                      <LogOut className="w-4 h-4" />
-                      <span>Sign Out</span>
-                    </button>
-                  </>
-                ) : (
-                  <div className="p-2 space-y-2">
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
-                      You are in guest browsing mode. Sign in to sync your vault.
-                    </p>
-                    <button
-                      onClick={() => {
-                        setIsAuthModalOpen(true);
-                        setIsProfileOpen(false);
-                      }}
-                      className="w-full py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-semibold shadow-md transition-colors"
-                    >
-                      Sign In / Sign Up
-                    </button>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </div>
       </div>
     </header>
   );

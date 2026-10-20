@@ -1,259 +1,286 @@
--- ====================================================================
--- FILEVAULT SUPABASE DATABASE SCHEMA & ROW LEVEL SECURITY SETUP
--- ====================================================================
+-- ==============================================================================
+-- SmartRoute AI — Comprehensive PostgreSQL & PostGIS Database Schema
+-- Intelligent Traffic & Commuter Assistance Platform
+-- ==============================================================================
 
--- 1. Enable UUID Extension
+-- 1. Enable PostGIS Extension for geospatial queries (if available)
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- PostGIS for real geographic coordinates, distance calculations, and bounding box searches
+CREATE EXTENSION IF NOT EXISTS "postgis";
 
--- 2. User Profiles Table (extends Supabase auth.users)
-CREATE TABLE IF NOT EXISTS public.profiles (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  email TEXT NOT NULL,
-  full_name TEXT DEFAULT '',
-  avatar_url TEXT DEFAULT '',
-  storage_quota_bytes BIGINT DEFAULT 5368709120, -- 5 GB default
-  storage_used_bytes BIGINT DEFAULT 0,
-  created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
-  updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL
+-- 2. Create Custom ENUM Types
+DO $$ BEGIN
+    CREATE TYPE user_role AS ENUM ('commuter', 'warden', 'admin');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE incident_type AS ENUM (
+        'accident', 
+        'congestion', 
+        'closure', 
+        'pothole', 
+        'flooding', 
+        'breakdown', 
+        'hazard'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE severity_level AS ENUM ('low', 'medium', 'high', 'critical');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE incident_status AS ENUM (
+        'reported', 
+        'under_review', 
+        'confirmed', 
+        'resolved', 
+        'rejected'
+    );
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    CREATE TYPE verification_state AS ENUM ('verified', 'community', 'flagged');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+-- 3. Users Table
+CREATE TABLE IF NOT EXISTS public.users (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    role user_role NOT NULL DEFAULT 'commuter',
+    avatar_url TEXT,
+    phone TEXT,
+    trust_score INT NOT NULL DEFAULT 100,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 3. Folders Table (nested folder hierarchy per user)
-CREATE TABLE IF NOT EXISTS public.folders (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  parent_id UUID REFERENCES public.folders(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  color TEXT DEFAULT '#4f46e5',
-  is_favorite BOOLEAN DEFAULT FALSE,
-  is_trash BOOLEAN DEFAULT FALSE,
-  trash_date TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
-  updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL
+-- Index on email & role for quick lookups
+CREATE INDEX IF NOT EXISTS idx_users_email ON public.users(email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON public.users(role);
+
+-- 4. Incidents Table
+CREATE TABLE IF NOT EXISTS public.incidents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    reporter_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+    reporter_name TEXT,
+    incident_type incident_type NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    description TEXT NOT NULL,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    address_text TEXT,
+    severity severity_level NOT NULL DEFAULT 'medium',
+    status incident_status NOT NULL DEFAULT 'reported',
+    verification_state verification_state NOT NULL DEFAULT 'community',
+    upvotes INT NOT NULL DEFAULT 1,
+    photo_url TEXT,
+    estimated_delay_minutes INT DEFAULT 0,
+    affected_direction TEXT DEFAULT 'Both directions',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 4. Files Table (file metadata and storage reference)
-CREATE TABLE IF NOT EXISTS public.files (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  folder_id UUID REFERENCES public.folders(id) ON DELETE SET NULL,
-  name TEXT NOT NULL,
-  size BIGINT NOT NULL,
-  type TEXT NOT NULL,
-  category TEXT NOT NULL CHECK (category IN ('image', 'video', 'audio', 'document', 'archive', 'other')),
-  storage_path TEXT NOT NULL,
-  thumbnail_url TEXT,
-  width INTEGER,
-  height INTEGER,
-  duration INTEGER,
-  hash TEXT,
-  is_favorite BOOLEAN DEFAULT FALSE,
-  is_trash BOOLEAN DEFAULT FALSE,
-  trash_date TIMESTAMPTZ,
-  created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
-  updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL
+-- Add spatial index if PostGIS is enabled
+CREATE INDEX IF NOT EXISTS idx_incidents_lat_lon ON public.incidents(latitude, longitude);
+CREATE INDEX IF NOT EXISTS idx_incidents_status ON public.incidents(status);
+CREATE INDEX IF NOT EXISTS idx_incidents_severity ON public.incidents(severity);
+CREATE INDEX IF NOT EXISTS idx_incidents_type ON public.incidents(incident_type);
+CREATE INDEX IF NOT EXISTS idx_incidents_created_at ON public.incidents(created_at DESC);
+
+-- 5. Incident Updates Table (Audit Log of Status Transitions)
+CREATE TABLE IF NOT EXISTS public.incident_updates (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    incident_id UUID NOT NULL REFERENCES public.incidents(id) ON DELETE CASCADE,
+    updated_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+    updated_by_name TEXT,
+    previous_status incident_status NOT NULL,
+    new_status incident_status NOT NULL,
+    notes TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 5. Photo Albums Table
-CREATE TABLE IF NOT EXISTS public.albums (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  description TEXT,
-  cover_image_id UUID REFERENCES public.files(id) ON DELETE SET NULL,
-  created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
-  updated_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL
+CREATE INDEX IF NOT EXISTS idx_incident_updates_incident_id ON public.incident_updates(incident_id);
+CREATE INDEX IF NOT EXISTS idx_incident_updates_created_at ON public.incident_updates(created_at DESC);
+
+-- 6. Saved Routes Table
+CREATE TABLE IF NOT EXISTS public.saved_routes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    route_name TEXT NOT NULL,
+    origin_name TEXT NOT NULL,
+    origin_lat DOUBLE PRECISION NOT NULL,
+    origin_lng DOUBLE PRECISION NOT NULL,
+    destination_name TEXT NOT NULL,
+    destination_lat DOUBLE PRECISION NOT NULL,
+    destination_lng DOUBLE PRECISION NOT NULL,
+    preferred_route_details JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 6. Album Files Junction Table
-CREATE TABLE IF NOT EXISTS public.album_files (
-  album_id UUID NOT NULL REFERENCES public.albums(id) ON DELETE CASCADE,
-  file_id UUID NOT NULL REFERENCES public.files(id) ON DELETE CASCADE,
-  added_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL,
-  PRIMARY KEY (album_id, file_id)
-);
+CREATE INDEX IF NOT EXISTS idx_saved_routes_user_id ON public.saved_routes(user_id);
 
--- 7. Secure Shared Links Table
-CREATE TABLE IF NOT EXISTS public.shares (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  file_id UUID NOT NULL REFERENCES public.files(id) ON DELETE CASCADE,
-  token TEXT NOT NULL UNIQUE,
-  password_hash TEXT,
-  expires_at TIMESTAMPTZ,
-  views_count INTEGER DEFAULT 0,
-  downloads_count INTEGER DEFAULT 0,
-  is_active BOOLEAN DEFAULT TRUE,
-  created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL
-);
-
--- 8. Activity Log Table
-CREATE TABLE IF NOT EXISTS public.activities (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-  action TEXT NOT NULL,
-  target_name TEXT NOT NULL,
-  target_type TEXT NOT NULL,
-  details TEXT,
-  created_at TIMESTAMPTZ DEFAULT TIMEZONE('utc', NOW()) NOT NULL
-);
-
--- ====================================================================
--- INDEXES FOR MAXIMUM QUERY PERFORMANCE
--- ====================================================================
-CREATE INDEX IF NOT EXISTS idx_folders_user_parent ON public.folders(user_id, parent_id);
-CREATE INDEX IF NOT EXISTS idx_files_user_folder ON public.files(user_id, folder_id);
-CREATE INDEX IF NOT EXISTS idx_files_user_category ON public.files(user_id, category);
-CREATE INDEX IF NOT EXISTS idx_files_user_trash ON public.files(user_id, is_trash);
-CREATE INDEX IF NOT EXISTS idx_files_user_favorite ON public.files(user_id, is_favorite);
-CREATE INDEX IF NOT EXISTS idx_albums_user ON public.albums(user_id);
-CREATE INDEX IF NOT EXISTS idx_shares_token ON public.shares(token);
-
--- ====================================================================
--- ROW LEVEL SECURITY (RLS) POLICIES
--- ====================================================================
-
--- Enable RLS on all tables
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.folders ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.files ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.albums ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.album_files ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.shares ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.activities ENABLE ROW LEVEL SECURITY;
-
--- Profiles: Users can only see and update their own profile
-CREATE POLICY "Users can view own profile" ON public.profiles FOR SELECT USING (auth.uid() = id);
-CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
-
--- Folders: Strict User Isolation
-CREATE POLICY "Users can view own folders" ON public.folders FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users can create own folders" ON public.folders FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can update own folders" ON public.folders FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "Users can delete own folders" ON public.folders FOR DELETE USING (auth.uid() = user_id);
-
--- Files: Strict User Isolation
-CREATE POLICY "Users can view own files" ON public.files FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users can insert own files" ON public.files FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can update own files" ON public.files FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "Users can delete own files" ON public.files FOR DELETE USING (auth.uid() = user_id);
-
--- Albums: Strict User Isolation
-CREATE POLICY "Users can view own albums" ON public.albums FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users can insert own albums" ON public.albums FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can update own albums" ON public.albums FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "Users can delete own albums" ON public.albums FOR DELETE USING (auth.uid() = user_id);
-
--- Album Files: Can only link files owned by current user
-CREATE POLICY "Users can view album files" ON public.album_files FOR SELECT 
-  USING (EXISTS (SELECT 1 FROM public.albums a WHERE a.id = album_id AND a.user_id = auth.uid()));
-CREATE POLICY "Users can insert album files" ON public.album_files FOR INSERT 
-  WITH CHECK (EXISTS (SELECT 1 FROM public.albums a WHERE a.id = album_id AND a.user_id = auth.uid()));
-CREATE POLICY "Users can delete album files" ON public.album_files FOR DELETE 
-  USING (EXISTS (SELECT 1 FROM public.albums a WHERE a.id = album_id AND a.user_id = auth.uid()));
-
--- Shares: Public access by token (if active & not expired), owner full access
-CREATE POLICY "Anyone can view active share by token" ON public.shares FOR SELECT 
-  USING (is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW()));
-CREATE POLICY "Users manage their own shares" ON public.shares FOR ALL 
-  USING (auth.uid() = user_id);
-
--- Activities: Strict User Isolation
-CREATE POLICY "Users can view own activities" ON public.activities FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users can insert own activities" ON public.activities FOR INSERT WITH CHECK (auth.uid() = user_id);
-
--- ====================================================================
--- AUTOMATIC PROFILE CREATION & STORAGE CALCULATION TRIGGERS
--- ====================================================================
-
--- Function to handle new user signup
-CREATE OR REPLACE FUNCTION public.handle_new_user()
+-- 7. Trigger to automatically update `updated_at` on Incidents
+CREATE OR REPLACE FUNCTION update_incident_timestamp()
 RETURNS TRIGGER AS $$
 BEGIN
-  INSERT INTO public.profiles (id, email, full_name, avatar_url)
-  VALUES (
-    new.id, 
-    new.email, 
-    COALESCE(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
-    COALESCE(new.raw_user_meta_data->>'avatar_url', '')
-  );
-  RETURN NEW;
+    NEW.updated_at = NOW();
+    RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql;
 
--- Trigger for auth.users
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+DROP TRIGGER IF EXISTS trg_update_incident_timestamp ON public.incidents;
+CREATE TRIGGER trg_update_incident_timestamp
+BEFORE UPDATE ON public.incidents
+FOR EACH ROW
+EXECUTE FUNCTION update_incident_timestamp();
 
--- Function to update storage used when files are added or deleted
-CREATE OR REPLACE FUNCTION public.sync_user_storage_usage()
-RETURNS TRIGGER AS $$
-DECLARE
-  target_user_id UUID;
-  total_used BIGINT;
-BEGIN
-  IF (TG_OP = 'DELETE') THEN
-    target_user_id := OLD.user_id;
-  ELSE
-    target_user_id := NEW.user_id;
-  END IF;
+-- 8. Row Level Security (RLS) Configuration
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.incidents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.incident_updates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.saved_routes ENABLE ROW LEVEL SECURITY;
 
-  SELECT COALESCE(SUM(size), 0) INTO total_used
-  FROM public.files
-  WHERE user_id = target_user_id AND is_trash = FALSE;
+-- Incidents RLS Policies:
+-- Anyone can view incidents
+CREATE POLICY "Public incidents are viewable by everyone" 
+ON public.incidents FOR SELECT USING (true);
 
-  UPDATE public.profiles
-  SET storage_used_bytes = total_used, updated_at = NOW()
-  WHERE id = target_user_id;
+-- Authenticated or guest commuters can report incidents
+CREATE POLICY "Commuters can insert incidents" 
+ON public.incidents FOR INSERT WITH CHECK (true);
 
-  RETURN NULL;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+-- Admins and wardens can update any incident; reporters can update their own
+CREATE POLICY "Authorized users can update incidents" 
+ON public.incidents FOR UPDATE USING (
+    auth.uid() = reporter_id 
+    OR EXISTS (
+        SELECT 1 FROM public.users 
+        WHERE id = auth.uid() AND role IN ('warden', 'admin')
+    )
+);
 
-DROP TRIGGER IF EXISTS trg_sync_storage_on_file_change ON public.files;
-CREATE TRIGGER trg_sync_storage_on_file_change
-  AFTER INSERT OR UPDATE OF size, is_trash OR DELETE ON public.files
-  FOR EACH ROW EXECUTE PROCEDURE public.sync_user_storage_usage();
+-- Saved Routes Policies:
+CREATE POLICY "Users can manage their own saved routes"
+ON public.saved_routes FOR ALL USING (auth.uid() = user_id);
 
--- ====================================================================
--- SUPABASE STORAGE BUCKET CREATION & POLICIES
--- ====================================================================
+-- 9. Sample Seed Data for Bengaluru, Karnataka
+INSERT INTO public.users (id, name, email, role, avatar_url, trust_score) VALUES
+('11111111-1111-1111-1111-111111111111', 'Arjun Rao (Commuter)', 'commuter@smartroute.ai', 'commuter', 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80', 120),
+('22222222-2222-2222-2222-222222222222', 'Inspector Ramesh Kumar', 'warden@smartroute.ai', 'warden', 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=120&auto=format&fit=crop&q=80', 450),
+('33333333-3333-3333-3333-333333333333', 'Bengaluru Traffic Control Room', 'admin@smartroute.ai', 'admin', 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=120&auto=format&fit=crop&q=80', 1000)
+ON CONFLICT (email) DO NOTHING;
 
--- Insert private bucket 'filevault' if not already created
-INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES ('filevault', 'filevault', false, 104857600, NULL) -- 100MB per file limit
+INSERT INTO public.incidents (
+    id, reporter_id, reporter_name, incident_type, title, description,
+    latitude, longitude, address_text, severity, status, verification_state,
+    upvotes, estimated_delay_minutes, affected_direction, created_at
+) VALUES
+(
+    'a1111111-1111-1111-1111-111111111111',
+    '22222222-2222-2222-2222-222222222222',
+    'Inspector Ramesh Kumar',
+    'accident',
+    'Multi-vehicle collision on Hebbal Flyover incline',
+    '3-car pileup blocking 2 lanes towards Yelahanka / Airport. Traffic police crane dispatched. Heavy tailbacks extending to Esteem Mall.',
+    13.0358, 77.5970,
+    'Hebbal Flyover, Bellary Road, Bengaluru',
+    'critical', 'confirmed', 'verified',
+    42, 40, 'Northbound (Airport Bound)', NOW() - INTERVAL '25 minutes'
+),
+(
+    'a2222222-2222-2222-2222-222222222222',
+    '11111111-1111-1111-1111-111111111111',
+    'Arjun Rao',
+    'flooding',
+    'Severe Waterlogging under Marathahalli Railway Bridge',
+    'Monsoon rainwater accumulated up to 2.5 feet. Cars stalled. Heavy vehicles only passing slowly. Avoid and use HAL Old Airport Road bypass.',
+    12.9562, 77.7011,
+    'Outer Ring Road, Marathahalli, Bengaluru',
+    'critical', 'confirmed', 'verified',
+    89, 50, 'Both directions', NOW() - INTERVAL '50 minutes'
+),
+(
+    'a3333333-3333-3333-3333-333333333333',
+    '11111111-1111-1111-1111-111111111111',
+    'Community Reporter',
+    'congestion',
+    'Massive bottleneck at Central Silk Board Junction',
+    'Signal cycle delays combined with metro construction barricades. Waiting time exceeds 4 cycles. Tailback up to HSR 5th Main.',
+    12.9176, 77.6234,
+    'Central Silk Board, Hosur Road, Bengaluru',
+    'high', 'confirmed', 'verified',
+    115, 35, 'Towards Electronic City & BTM', NOW() - INTERVAL '15 minutes'
+),
+(
+    'a4444444-4444-4444-4444-444444444444',
+    '11111111-1111-1111-1111-111111111111',
+    'Siddharth M.',
+    'breakdown',
+    'Broken-down BMTC Volvo Bus at Tin Factory Junction',
+    'Engine failure in rightmost lane before KR Puram railway bridge. Tow truck en route. Extreme crawl towards Whitefield.',
+    12.9934, 77.6608,
+    'Old Madras Road, Tin Factory, Bengaluru',
+    'high', 'under_review', 'community',
+    28, 25, 'Eastbound towards Whitefield', NOW() - INTERVAL '18 minutes'
+),
+(
+    'a5555555-5555-5555-5555-555555555555',
+    '11111111-1111-1111-1111-111111111111',
+    'Pooja Nair',
+    'pothole',
+    'Deep crater potholes near Bellandur EcoWorld Gate 2',
+    'Multiple crater-sized potholes exposed after rain. Two-wheelers at high risk of skidding. BBMP complaint registered.',
+    12.9260, 77.6833,
+    'Outer Ring Road, Bellandur, Bengaluru',
+    'medium', 'reported', 'community',
+    19, 10, 'Service road & Left lane', NOW() - INTERVAL '2 hours'
+),
+(
+    'a6666666-6666-6666-6666-666666666666',
+    '33333333-3333-3333-3333-333333333333',
+    'Traffic Police Control',
+    'closure',
+    'Road closed for BMRCL Metro underground utility diversion',
+    'Chickpet to Avenue Road closed for vehicular transit from 10 PM to 6 AM daily. Detours via Mysore Road.',
+    12.9702, 77.5752,
+    'Avenue Road, Chickpet, Bengaluru',
+    'medium', 'confirmed', 'verified',
+    34, 15, 'Full road closure', NOW() - INTERVAL '5 hours'
+),
+(
+    'a7777777-7777-7777-7777-777777777777',
+    '11111111-1111-1111-1111-111111111111',
+    'Rohan K.',
+    'hazard',
+    'Diesel slick on Electronic City Phase 1 exit ramp',
+    'Spilled fuel making ramp slippery. Sand being applied by NHAI maintenance patrol. Reduce speed to 20 km/h.',
+    12.8452, 77.6602,
+    'Electronic City Elevated Tollway Exit, Bengaluru',
+    'high', 'confirmed', 'verified',
+    52, 20, 'Exit ramp', NOW() - INTERVAL '40 minutes'
+),
+(
+    'a8888888-8888-8888-8888-888888888888',
+    '22222222-2222-2222-2222-222222222222',
+    'Traffic Warden',
+    'accident',
+    'Fender bender cleared at Sony World Junction Koramangala',
+    'Minor two-car collision moved to side of road. Debris cleared. Normal traffic flow restored.',
+    12.9345, 77.6277,
+    '100ft Road, Koramangala 4th Block, Bengaluru',
+    'low', 'resolved', 'verified',
+    64, 0, 'Cleared', NOW() - INTERVAL '3 hours'
+)
 ON CONFLICT (id) DO NOTHING;
-
--- Storage Policies (User-scoped by folder prefix: 'user_id/...')
-CREATE POLICY "Users can upload into their own folder"
-ON storage.objects FOR INSERT
-TO authenticated
-WITH CHECK (
-  bucket_id = 'filevault' AND
-  (storage.foldername(name))[1] = auth.uid()::text
-);
-
-CREATE POLICY "Users can view and download their own files"
-ON storage.objects FOR SELECT
-TO authenticated
-USING (
-  bucket_id = 'filevault' AND
-  (storage.foldername(name))[1] = auth.uid()::text
-);
-
-CREATE POLICY "Users can update their own files"
-ON storage.objects FOR UPDATE
-TO authenticated
-USING (
-  bucket_id = 'filevault' AND
-  (storage.foldername(name))[1] = auth.uid()::text
-);
-
-CREATE POLICY "Users can delete their own files"
-ON storage.objects FOR DELETE
-TO authenticated
-USING (
-  bucket_id = 'filevault' AND
-  (storage.foldername(name))[1] = auth.uid()::text
-);

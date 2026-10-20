@@ -1,192 +1,201 @@
 import React, { useState } from 'react';
-import { X, Shield, Lock, Mail, User, Sparkles } from 'lucide-react';
-import { useVault } from '../../context/VaultContext';
+import { useTraffic, DEMO_USERS } from '../../context/TrafficContext';
+import { UserRole } from '../../types/traffic';
+import { api } from '../../services/api';
+import {
+  ShieldCheck,
+  User,
+  Lock,
+  Mail,
+  X,
+  Sparkles,
+  ArrowRight,
+  CheckCircle2,
+  AlertCircle
+} from 'lucide-react';
 
 export const AuthModal: React.FC = () => {
-  const { isAuthModalOpen, setIsAuthModalOpen, login, signUp } = useVault();
-  const [tab, setTab] = useState<'signin' | 'signup' | 'forgot'>('signin');
+  const { authModalOpen, setAuthModalOpen, setCurrentUser, switchUserRole, addNotification } = useTraffic();
+
+  const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [role, setRole] = useState<UserRole>('commuter');
   const [errorMsg, setErrorMsg] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [successNotice, setSuccessNotice] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!isAuthModalOpen) return null;
+  if (!authModalOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
-    setSuccessNotice('');
-    setLoading(true);
 
-    if (tab === 'signin') {
-      const res = await login(email, password);
-      if (res.error) {
-        setErrorMsg(res.error);
-      } else {
-        setIsAuthModalOpen(false);
+    if (mode === 'login') {
+      if (!email.trim() || !password.trim()) {
+        setErrorMsg('Please enter both email and password.');
+        return;
       }
-    } else if (tab === 'signup') {
-      const res = await signUp(email, password, fullName);
-      if (res.error) {
-        setErrorMsg(res.error);
-      } else {
-        setIsAuthModalOpen(false);
+      setIsSubmitting(true);
+      try {
+        const res = await api.login(email.trim());
+        setCurrentUser(res.user);
+        addNotification('success', 'Logged In Successfully', `Welcome back, ${res.user.name}!`);
+        setAuthModalOpen(false);
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Login failed. Please check your credentials.');
+      } finally {
+        setIsSubmitting(false);
       }
     } else {
-      // Forgot password
-      setSuccessNotice(`Password reset instructions sent to ${email}`);
+      if (!name.trim() || !email.trim() || !password.trim()) {
+        setErrorMsg('Name, email, and password are required.');
+        return;
+      }
+      setIsSubmitting(true);
+      try {
+        const res = await api.register({
+          name: name.trim(),
+          email: email.trim(),
+          role,
+          phone: phone.trim()
+        });
+        setCurrentUser(res.user);
+        addNotification('success', 'Account Registered', `Welcome to SmartRoute AI, ${res.user.name}!`);
+        setAuthModalOpen(false);
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Registration failed.');
+      } finally {
+        setIsSubmitting(false);
+      }
     }
-    setLoading(false);
   };
 
-  const handleDemoSignIn = async () => {
-    setLoading(true);
-    await login('demo.user@filevault.io', 'demo12345');
-    setLoading(false);
-    setIsAuthModalOpen(false);
+  const handleDemoLogin = (r: UserRole) => {
+    switchUserRole(r);
+    setAuthModalOpen(false);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in select-none">
-      <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 animate-scale-in">
-        {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-brand-500/20">
-              <Shield className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-bold text-base text-slate-900 dark:text-white">
-                FileVault Access
-              </h3>
-              <p className="text-xs text-slate-400">Personal Cloud & Secure Storage</p>
-            </div>
+    <div className="fixed inset-0 z-50 bg-navy-950/80 backdrop-blur-md flex items-center justify-center p-4">
+      <div className="w-full max-w-md p-6 rounded-3xl bg-navy-900 border border-slate-700 shadow-2xl space-y-5 relative">
+        <button
+          onClick={() => setAuthModalOpen(false)}
+          className="absolute top-4 right-4 p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
+        {/* Modal Header */}
+        <div className="text-center space-y-1">
+          <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center mx-auto text-cyan-400">
+            <Lock className="w-6 h-6" />
           </div>
-          <button
-            onClick={() => setIsAuthModalOpen(false)}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <h2 className="text-xl font-black text-white">
+            {mode === 'login' ? 'Sign In to SmartRoute AI' : 'Create Commuter Account'}
+          </h2>
+          <p className="text-xs text-slate-400">
+            Access saved daily commutes, report road incidents, and monitor live traffic telemetry.
+          </p>
         </div>
 
-        {/* Tab selector */}
-        <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl my-4 text-xs font-semibold">
-          <button
-            onClick={() => {
-              setTab('signin');
-              setErrorMsg('');
-            }}
-            className={`flex-1 py-1.5 rounded-lg transition-colors ${
-              tab === 'signin' ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 shadow-sm' : 'text-slate-500'
-            }`}
-          >
-            Sign In
-          </button>
-          <button
-            onClick={() => {
-              setTab('signup');
-              setErrorMsg('');
-            }}
-            className={`flex-1 py-1.5 rounded-lg transition-colors ${
-              tab === 'signup' ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 shadow-sm' : 'text-slate-500'
-            }`}
-          >
-            Sign Up
-          </button>
-          <button
-            onClick={() => {
-              setTab('forgot');
-              setErrorMsg('');
-            }}
-            className={`flex-1 py-1.5 rounded-lg transition-colors ${
-              tab === 'forgot' ? 'bg-white dark:bg-slate-700 text-brand-600 dark:text-brand-400 shadow-sm' : 'text-slate-500'
-            }`}
-          >
-            Reset
-          </button>
+        {/* 1-Click Instant Demo Login Buttons */}
+        <div className="p-3.5 rounded-2xl bg-navy-950 border border-slate-800 space-y-2">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 text-center">
+            🚀 1-Click Instant Evaluation Logins
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              onClick={() => handleDemoLogin('commuter')}
+              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-slate-200 transition text-center"
+            >
+              👤 Commuter
+            </button>
+            <button
+              onClick={() => handleDemoLogin('warden')}
+              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-cyan-300 transition text-center"
+            >
+              🛡️ Warden
+            </button>
+            <button
+              onClick={() => handleDemoLogin('admin')}
+              className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-semibold text-purple-300 transition text-center"
+            >
+              👑 Admin
+            </button>
+          </div>
         </div>
+
+        {errorMsg && (
+          <div className="p-3 rounded-xl bg-red-950/60 border border-red-800/40 text-red-300 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {tab === 'signup' && (
+        <form onSubmit={handleSubmit} className="space-y-3">
+          {mode === 'register' && (
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-slate-400" />
-                <span>Full Name</span>
-              </label>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Full Name</label>
               <input
                 type="text"
-                required
-                value={fullName}
-                onChange={e => setFullName(e.target.value)}
-                placeholder="e.g. Alex Morgan"
-                className="w-full px-3.5 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-brand-500"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="e.g. Priya Sharma"
+                className="w-full bg-navy-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
               />
             </div>
           )}
 
           <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1.5">
-              <Mail className="w-3.5 h-3.5 text-slate-400" />
-              <span>Email Address</span>
-            </label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Email Address</label>
             <input
               type="email"
-              required
               value={email}
               onChange={e => setEmail(e.target.value)}
-              placeholder="alex@example.com"
-              className="w-full px-3.5 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-brand-500"
+              placeholder="commuter@smartroute.ai"
+              className="w-full bg-navy-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
             />
           </div>
 
-          {tab !== 'forgot' && (
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1 flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5 text-slate-400" />
-                <span>Password</span>
-              </label>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full px-3.5 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-white focus:outline-none focus:border-brand-500"
-              />
-            </div>
-          )}
-
-          {errorMsg && (
-            <p className="text-xs text-rose-500 font-medium">{errorMsg}</p>
-          )}
-
-          {successNotice && (
-            <p className="text-xs text-emerald-500 font-medium">{successNotice}</p>
-          )}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full bg-navy-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
 
           <button
             type="submit"
-            disabled={loading}
-            className="w-full py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold shadow-md transition-colors disabled:opacity-50"
+            disabled={isSubmitting}
+            className="w-full py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-navy-950 font-black text-xs shadow-lg shadow-cyan-500/20 transition mt-2"
           >
-            {loading ? 'Processing...' : tab === 'signin' ? 'Sign In to Vault' : tab === 'signup' ? 'Create Account' : 'Send Reset Link'}
+            {isSubmitting ? 'Authenticating...' : mode === 'login' ? 'Sign In' : 'Create Account'}
           </button>
         </form>
 
-        {/* Demo fast sign-in */}
-        <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800">
-          <button
-            type="button"
-            onClick={handleDemoSignIn}
-            className="w-full py-2 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-slate-800 dark:to-slate-800/80 border border-indigo-200/60 dark:border-slate-700 text-indigo-700 dark:text-indigo-300 hover:text-indigo-900 dark:hover:text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-            <span>Instant Demo Sign-in (1-Click)</span>
-          </button>
+        <div className="text-center pt-2 border-t border-slate-800 text-xs text-slate-400">
+          {mode === 'login' ? (
+            <span>
+              Don't have an account?{' '}
+              <button onClick={() => setMode('register')} className="text-cyan-400 font-bold hover:underline">
+                Register now
+              </button>
+            </span>
+          ) : (
+            <span>
+              Already registered?{' '}
+              <button onClick={() => setMode('login')} className="text-cyan-400 font-bold hover:underline">
+                Sign in
+              </button>
+            </span>
+          )}
         </div>
       </div>
     </div>
